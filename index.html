@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SENTINEL — Global Flight, Ship & Military Tracker</title>
+  <meta name="description"
+    content="Real-time open-source tracking dashboard for flights, military aircraft, and ships." />
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="styles/main.css" />
+
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='16' fill='%23090d1a'/><text x='50%' y='60%' dominant-baseline='middle' text-anchor='middle' font-size='18'>✈</text></svg>" />
+
+  <style>
+    /* ── Refresh progress bar ── */
+    #refresh-bar {
+      position: fixed;
+      top: 52px;
+      left: 0;
+      right: 0;
+      height: 2px;
+      z-index: 1100;
+      background: rgba(0, 212, 255, 0.1);
+    }
+
+    #refresh-bar-fill {
+      height: 100%;
+      width: 100%;
+      transform-origin: left;
+      background: linear-gradient(90deg, #00d4ff, #00ff88);
+      box-shadow: 0 0 6px #00d4ff;
+      transition: transform 0.9s linear;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="refresh-bar">
+    <div id="refresh-bar-fill"></div>
+  </div>
+  <div id="map"></div>
+
+  <!-- ── Top Nav ──────────────────────────────────────────────── -->
+  <nav id="topnav">
+    <div class="nav-logo">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <circle cx="16" cy="16" r="15" stroke="#00d4ff" stroke-width="1.5" opacity="0.6" />
+        <circle cx="16" cy="16" r="10" stroke="#00d4ff" stroke-width="1" opacity="0.35" />
+        <circle cx="16" cy="16" r="5" stroke="#00d4ff" stroke-width="1" opacity="0.5" />
+        <circle cx="16" cy="16" r="2" fill="#00d4ff" />
+        <line x1="1" y1="16" x2="11" y2="16" stroke="#00d4ff" stroke-width="1" opacity="0.5" />
+        <line x1="21" y1="16" x2="31" y2="16" stroke="#00d4ff" stroke-width="1" opacity="0.5" />
+        <line x1="16" y1="1" x2="16" y2="11" stroke="#00d4ff" stroke-width="1" opacity="0.5" />
+        <line x1="16" y1="21" x2="16" y2="31" stroke="#00d4ff" stroke-width="1" opacity="0.5" />
+      </svg>
+      <div>
+        <div class="nav-logo-title">SENTINEL</div>
+        <div class="nav-logo-sub">GLOBAL TRACKING SYSTEM</div>
+      </div>
+    </div>
+
+    <div class="nav-spacer"></div>
+
+    <div class="nav-status-group">
+      <div class="status-pill">
+        <div id="sky-status-dot" class="status-dot"></div>
+        <span>OPENSKY</span>
+        <span id="sky-status-lbl" style="color:#fff">—</span>
+      </div>
+      <div class="status-pill">
+        <div id="ais-status-dot" class="status-dot"></div>
+        <span>AIS</span>
+        <span id="ais-status-lbl" style="color:#fff">—</span>
+      </div>
+      <div class="nav-time" id="utc-clock">00:00:00Z</div>
+      <button id="settings-btn" title="Settings">⚙</button>
+    </div>
+  </nav>
+
+  <!-- ── Sidebar ─────────────────────────────────────────────── -->
+  <aside id="sidebar">
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Live Contacts</div>
+      <div class="stats-grid">
+        <div class="stat-card stat-commercial">
+          <div class="stat-card-value" id="count-commercial">—</div>
+          <div class="stat-card-label">Commercial</div>
+        </div>
+        <div class="stat-card stat-military">
+          <div class="stat-card-value" id="count-military">—</div>
+          <div class="stat-card-label">Military</div>
+        </div>
+        <div class="stat-card stat-ships">
+          <div class="stat-card-value" id="count-ships">—</div>
+          <div class="stat-card-label">Ships</div>
+        </div>
+        <div class="stat-card stat-total">
+          <div class="stat-card-value" id="count-total">—</div>
+          <div class="stat-card-label">Total</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Layers</div>
+      <div class="layer-item">
+        <div class="layer-name"><span class="layer-dot commercial"></span>Commercial Flights</div>
+        <label class="toggle-switch">
+          <input type="checkbox" class="layer-toggle" data-layer="commercial" checked id="toggle-commercial" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="layer-item">
+        <div class="layer-name"><span class="layer-dot military"></span>Military Aircraft</div>
+        <label class="toggle-switch">
+          <input type="checkbox" class="layer-toggle" data-layer="military" checked id="toggle-military" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="layer-item">
+        <div class="layer-name"><span class="layer-dot ships"></span>Maritime Vessels</div>
+        <label class="toggle-switch">
+          <input type="checkbox" class="layer-toggle" data-layer="ships" checked id="toggle-ships" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Search / Filter</div>
+      <input type="text" id="search-box" placeholder="Callsign, ICAO, country…" autocomplete="off" spellcheck="false" />
+    </div>
+
+    <div class="sidebar-alerts-label">Event Feed</div>
+    <div id="alert-feed"></div>
+
+  </aside>
+
+  <button id="sidebar-toggle" title="Toggle sidebar">◀</button>
+
+  <!-- ── Detail Panel ─────────────────────────────────────────── -->
+  <aside id="detail-panel">
+    <div id="detail-header">
+      <button id="detail-close">✕</button>
+      <div id="detail-title">—</div>
+      <div id="detail-sub">—</div>
+      <div id="detail-badge" class="badge badge-commercial">—</div>
+    </div>
+    <div id="detail-body"></div>
+  </aside>
+
+  <!-- ── Settings Modal ──────────────────────────────────────── -->
+  <div id="settings-modal">
+    <div class="modal-box">
+      <div class="modal-title">⚙ Settings</div>
+      <p class="modal-desc">
+        Ship tracking uses <a href="https://aisstream.io" target="_blank" rel="noopener">aisstream.io</a>
+        — free signup, no credit card.
+      </p>
+      <input type="text" id="ais-key-input" class="modal-input" placeholder="Paste your aisstream.io API key…" />
+      <div class="modal-footer">
+        <button id="save-ais-key" class="btn btn-primary">Save & Connect</button>
+        <button id="settings-close" class="btn btn-ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Command Terminal ─────────────────────────────────────── -->
+  <div id="terminal-bar">
+    <span class="terminal-prompt">SENTINEL❯</span>
+    <input id="terminal-input" type="text" spellcheck="false" autocomplete="off"
+      placeholder="Type a command… (help · zoom iran · hide ships · key abc123)" />
+    <span class="terminal-hint">↑↓ history · Enter to run</span>
+  </div>
+
+  <!-- ── Bottom bar ───────────────────────────────────────────── -->
+  <div id="bottom-bar">
+    <div class="bottom-item">OPENSKY NETWORK (CC BY 4.0) · AISSTREAM.IO</div>
+    <div class="nav-spacer"></div>
+    <div class="bottom-item">UPDATED: <span id="last-refresh">—</span></div>
+    <div class="bottom-item">NEXT IN <span id="countdown">10</span>s</div>
+  </div>
+
+  <!-- Leaflet -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+  <!-- App -->
+  <script type="module" src="js/app.js"></script>
+
+  <script>
+    // UTC clock
+    function tick() {
+      document.getElementById('utc-clock').textContent =
+        new Date().toUTCString().split(' ')[4] + 'Z';
+    }
+    setInterval(tick, 1000); tick();
+
+    // Progress bar + countdown
+    const INTERVAL = 10;
+    let cd = INTERVAL;
+    const fill = document.getElementById('refresh-bar-fill');
+    function animBar(pct) { if (fill) fill.style.transform = `scaleX(${pct})`; }
+    setInterval(() => {
+      cd = cd <= 1 ? INTERVAL : cd - 1;
+      const el = document.getElementById('countdown');
+      if (el) el.textContent = cd;
+      animBar(cd / INTERVAL);
+    }, 1000);
+    animBar(1);
+  </script>
+</body>
+
+</html>
