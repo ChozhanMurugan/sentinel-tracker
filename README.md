@@ -19,15 +19,6 @@
 ### Global Dashboard — 10,000+ Live Contacts
 ![SENTINEL Dashboard showing aircraft across Europe, Middle East and India](screenshots/dashboard-overview.png)
 
-### Aircraft Detail Panel — Click Any Marker for Live Data
-![Detail panel showing WZZ84ZJ flight data including altitude, speed and heading](screenshots/aircraft-detail.png)
-
-### Zoomed View — Europe Air Traffic
-![Europe view showing dense commercial and military air traffic](screenshots/europe-view.png)
-
-### 🎬 Demo Recording
-![Live demo showing marker rendering and terminal commands](screenshots/demo-recording.webp)
-
 ---
 
 ## ✨ Features
