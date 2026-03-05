@@ -13,7 +13,12 @@ const CONFIG = {
     flightRefreshMs: 10000,   // 10 s — OpenSky minimum safe interval
     shipRefreshMs: 0,         // ships come in via live websocket (aisstream.io)
 
-    // ── OpenSky Network ────────────────────────────────────────
+    // ── Backend (Phase 1) ──────────────────────────────────────
+    // Set these to your backend URL once docker-compose is running
+    backendWs: 'ws://localhost:8000/ws',   // WebSocket live stream
+    backendApi: 'http://localhost:8000',     // REST API base
+
+    // ── OpenSky Network (fallback) ──────────────────────────────
     openskyUrl: 'https://opensky-network.org/api/states/all',
 
     // ── aisstream.io ──────────────────────────────────────────

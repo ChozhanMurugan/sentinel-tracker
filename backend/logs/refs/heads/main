@@ -1,2 +1,0 @@
-0000000000000000000000000000000000000000 73fe7726ab67ddfefc9c5d0e8db9df8c0d750a5b chozhanmurugan <chozhan.a.murugan@sogeti.com> 1772735077 -0800	commit (initial): feat: Phase 1 backend — FastAPI + TimescaleDB + Redis + WebSocket
-73fe7726ab67ddfefc9c5d0e8db9df8c0d750a5b 73fe7726ab67ddfefc9c5d0e8db9df8c0d750a5b chozhanmurugan <chozhan.a.murugan@sogeti.com> 1772735141 -0800	Branch: renamed refs/heads/master to refs/heads/main
