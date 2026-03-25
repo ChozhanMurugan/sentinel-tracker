@@ -156,6 +156,21 @@ export class CanvasLayer {
         ctx.fillStyle = sel ? '#ffffff' : color;
         ctx.fill();
         ctx.restore();
+
+        // Anomaly ring — pulsing orange circle
+        if (e.anomaly) {
+            const ringR = 14 + this._pulse * 6;
+            const ringAlpha = 0.4 + this._pulse * 0.4;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(x, y, ringR, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(255, 165, 0, ${ringAlpha})`;
+            ctx.lineWidth = 2;
+            ctx.shadowColor = '#ff8c00';
+            ctx.shadowBlur = 8 + this._pulse * 8;
+            ctx.stroke();
+            ctx.restore();
+        }
     }
 
     _drawShip(ctx, x, y, e, sel) {

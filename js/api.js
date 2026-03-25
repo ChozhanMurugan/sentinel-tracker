@@ -1,12 +1,12 @@
 /**
- * SENTINEL — API Module
+ * SENTINEL \u2014 API Module
  * Connects to the backend WebSocket (ws://localhost:8000/ws).
  * Falls back to direct OpenSky polling if the backend is unavailable.
  */
 
-import { CONFIG } from './config.js';
+import CONFIG from './config.js';
 
-// ── Backend WebSocket client ──────────────────────────────────────
+// \u2500\u2500 Backend WebSocket client \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
 let _ws = null;
 let _reconnectTimer = null;
@@ -23,25 +23,23 @@ let _onStats = null;    // callback(stats)
 export function connectBackend(onUpdate, onStats) {
     _onUpdate = onUpdate;
     _onStats = onStats;
-    _connect();
+    _connectBackend();
 }
 
-function _connect() {
+function _connectBackend() {
     if (_ws) {
         try { _ws.close(); } catch (_) { }
     }
 
     const url = CONFIG.backendWs || 'ws://localhost:8000/ws';
     console.info('[API] Connecting to backend WS:', url);
-    _setStatus('backend', 'connecting');
 
     _ws = new WebSocket(url);
 
     _ws.onopen = () => {
-        console.info('[API] Backend WS connected ✓');
+        console.info('[API] Backend WS connected');
         _reconnectDelay = 2000;
         _useBackend = true;
-        _setStatus('backend', 'live');
     };
 
     _ws.onmessage = (ev) => {
@@ -58,89 +56,115 @@ function _connect() {
     };
 
     _ws.onerror = () => {
-        console.warn('[API] WS error — falling back to direct API');
-        _setStatus('backend', 'error');
+        console.warn('[API] WS error \u2014 falling back to direct API');
     };
 
     _ws.onclose = () => {
-        _setStatus('backend', 'disconnected');
-        _scheduleReconnect();
+        clearTimeout(_reconnectTimer);
+        _reconnectTimer = setTimeout(() => {
+            _connectBackend();
+            _reconnectDelay = Math.min(_reconnectDelay * 2, 30000);
+        }, _reconnectDelay);
     };
 }
 
-function _scheduleReconnect() {
-    clearTimeout(_reconnectTimer);
-    _reconnectTimer = setTimeout(() => {
-        console.info('[API] Reconnecting in %dms …', _reconnectDelay);
-        _connect();
-        _reconnectDelay = Math.min(_reconnectDelay * 2, 30000);
-    }, _reconnectDelay);
-}
+// \u2500\u2500 fetchFlights \u2014 direct OpenSky polling (no backend needed) \u2500\u2500\u2500\u2500\u2500
 
-/** Send a heartbeat ping to keep the WS alive. */
-export function pingBackend() {
-    if (_ws?.readyState === WebSocket.OPEN) {
-        _ws.send('ping');
+export async function fetchFlights() {
+    try {
+        const resp = await fetch(CONFIG.openskyUrl);
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        const states = data.states || [];
+        return states
+            .filter(s => s[6] != null && s[5] != null)
+            .map(s => ({
+                icao24: s[0],
+                callsign: (s[1] || '').trim(),
+                country: s[2] || '',
+                lat: s[6],
+                lon: s[5],
+                altitude: s[7],
+                speed: s[9],
+                heading: s[10],
+                vertRate: s[11],
+                onGround: !!s[8],
+                squawk: s[14] || '',
+                military: _isMilitary(s[0], (s[1] || '').trim()),
+                lastUpdate: (s[3] || Date.now() / 1000) * 1000,
+                type: 'aircraft',
+            }));
+    } catch (e) {
+        console.warn('[API] OpenSky poll error:', e);
+        return [];
     }
 }
 
-// ── REST helpers ──────────────────────────────────────────────────
-
-const _base = () => CONFIG.backendApi || 'http://localhost:8000';
-
-export async function fetchAircraftHistory(icao24, hours = 2) {
-    const res = await fetch(`${_base()}/api/aircraft/${icao24}/history?hours=${hours}`);
-    if (!res.ok) throw new Error(`History fetch failed: ${res.status}`);
-    return res.json();
-}
-
-export async function fetchBbox(minlat, maxlat, minlon, maxlon) {
-    const url = `${_base()}/api/aircraft/bbox/search?minlat=${minlat}&maxlat=${maxlat}&minlon=${minlon}&maxlon=${maxlon}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Bbox fetch failed: ${res.status}`);
-    return res.json();
-}
-
-export async function fetchStats() {
-    const res = await fetch(`${_base()}/api/stats`);
-    if (!res.ok) throw new Error(`Stats fetch failed: ${res.status}`);
-    return res.json();
-}
-
-// ── Fallback: Direct OpenSky polling (if backend unreachable) ─────
-
-let _pollTimer = null;
-let _pollCallback = null;
-
-export function startDirectPoll(onData) {
-    _pollCallback = onData;
-    _doPoll();
-}
-
-export function stopDirectPoll() {
-    clearTimeout(_pollTimer);
-}
-
-async function _doPoll() {
+// Quick heuristic \u2014 matches CONFIG.militaryIcaoRanges + callsign patterns
+function _isMilitary(icao, cs) {
     try {
-        const resp = await fetch(CONFIG.openSkyUrl);
-        if (resp.ok) {
-            const data = await resp.json();
-            _pollCallback?.(data);
+        const val = parseInt(icao, 16);
+        const ranges = CONFIG.militaryIcaoRanges || [];
+        for (const [lo, hi] of ranges) {
+            if (val >= lo && val <= hi) return true;
         }
-    } catch (_) { }
-    _pollTimer = setTimeout(_doPoll, (CONFIG.flightRefreshMs || 10000));
+    } catch (_) {}
+    const patterns = CONFIG.militaryCallsigns || [];
+    for (const p of patterns) {
+        if (cs.startsWith(p)) return true;
+    }
+    return false;
 }
 
-// ── Status pill helper ────────────────────────────────────────────
+// \u2500\u2500 AIS ship tracking (aisstream.io WebSocket) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
-function _setStatus(source, state) {
-    const pill = document.getElementById(
-        source === 'backend' ? 'backendStatus' : 'openSkyStatus'
-    );
-    if (!pill) return;
-    const labels = { live: 'Live', connecting: 'Connecting…', error: 'Error', disconnected: 'Offline' };
-    const colors = { live: '#00ff88', connecting: '#ffd700', error: '#ff3b3b', disconnected: '#888' };
-    pill.textContent = labels[state] || state;
-    pill.style.color = colors[state] || '#fff';
+let _aisWs = null;
+
+export function connectAIS(key, onShip, onStatus) {
+    if (!key) { onStatus?.('no-key'); return; }
+
+    try {
+        _aisWs = new WebSocket('wss://stream.aisstream.io/v0/stream');
+    } catch (e) {
+        onStatus?.('error');
+        return;
+    }
+
+    _aisWs.onopen = () => {
+        _aisWs.send(JSON.stringify({
+            APIKey: key,
+            BoundingBoxes: [[[-90, -180], [90, 180]]],
+        }));
+        onStatus?.('connected');
+    };
+
+    _aisWs.onmessage = (ev) => {
+        try {
+            const msg = JSON.parse(ev.data);
+            const pos = msg?.Message?.PositionReport;
+            if (!pos) return;
+            const meta = msg.MetaData || {};
+            onShip({
+                mmsi: String(meta.MMSI || ''),
+                name: (meta.ShipName || '').trim(),
+                lat: pos.Latitude,
+                lon: pos.Longitude,
+                speed: pos.Sog,
+                heading: pos.TrueHeading === 511 ? pos.Cog : pos.TrueHeading,
+                country: meta.country || '',
+                type: 'ship',
+                lastUpdate: Date.now(),
+            });
+        } catch (_) {}
+    };
+
+    _aisWs.onerror = () => onStatus?.('error');
+    _aisWs.onclose = () => onStatus?.('disconnected');
+}
+
+export function disconnectAIS() {
+    if (_aisWs) {
+        try { _aisWs.close(); } catch (_) {}
+        _aisWs = null;
+    }
 }

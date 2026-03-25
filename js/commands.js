@@ -38,8 +38,8 @@ const REGIONS = {
 };
 
 const HELP_TEXT =
-    'Commands: show/hide [military|ships|commercial|all] · ' +
-    'zoom [region] · search [text] · clear · key [ais-key] · status';
+    'Commands: show/hide [military|ships|commercial|all] \u00b7 ' +
+    'zoom [region] \u00b7 search [text] \u00b7 clear \u00b7 key [ais-key] \u00b7 analyze \u00b7 status';
 
 export class CommandProcessor {
     /**
@@ -56,6 +56,7 @@ export class CommandProcessor {
         this._setSearch = ctx.setSearch;
         this._saveKey = ctx.saveKey;
         this._push = ctx.pushAlert;
+        this._getAnomalies = ctx.getAnomalies || (() => new Map());
         this._history = [];
         this._histIdx = -1;
     }
@@ -92,6 +93,9 @@ export class CommandProcessor {
 
         // ── status ───────────────────────────────────────────────
         if (/^(status|info)$/.test(cmd)) return 'Tracker running. Type "help" for commands.';
+
+        // ── analyze / anomalies ──────────────────────────────────
+        if (/^(analyze|anomalies|ml|intelligence)$/.test(cmd)) return this._handleAnalyze();
 
         // ── show / hide / toggle ─────────────────────────────────
         const tv = cmd.match(/^(show|display|enable|turn on|unhide|hide|disable|turn off|toggle)\s+(all|commercial|flights?|military|ships?|vessels?)$/);
@@ -182,6 +186,22 @@ export class CommandProcessor {
 
     _flyTo({ center, zoom }) {
         this._map.flyTo(center, zoom, { animate: true, duration: 1.4, easeLinearity: 0.5 });
+    }
+
+    _handleAnalyze() {
+        const anomalies = this._getAnomalies();
+        if (!anomalies || anomalies.size === 0) {
+            return 'No anomalies detected (ML service may still be training)';
+        }
+        const count = anomalies.size;
+        const entries = [...anomalies.values()].slice(0, 5);
+        const summaries = entries.map(a => {
+            const id = a.callsign || a.icao24;
+            const reason = (a.reasons || [])[0] || 'unusual';
+            return `${id}: ${reason}`;
+        });
+        const more = count > 5 ? ` (+${count - 5} more)` : '';
+        return `${count} anomalies: ${summaries.join(' | ')}${more}`;
     }
 }
 

@@ -1,24 +1,30 @@
 // ============================================================
 //  APP.JS — Orchestrator
 // ============================================================
-import CONFIG from './config.js';
-import { fetchFlights, connectAIS, disconnectAIS } from './api.js';
+import CONFIG from './config.js?v=3';
+import { fetchFlights, connectAIS, disconnectAIS } from './api.js?v=3';
 import {
     initMap, getMap, upsertAircraft, upsertShip,
     pruneStaleMarkers, setLayerVisible, setMapFilter,
     getMarkerCounts
-} from './map.js';
+} from './map.js?v=3';
 import {
     showDetailPanel, hideDetailPanel, updateStats, pushAlert,
     setAISStatus, setFlightStatus, setLastRefresh,
     getSearchFilter
-} from './ui.js';
-import { CommandProcessor } from './commands.js';
+} from './ui.js?v=3';
+import { CommandProcessor } from './commands.js?v=3';
 
 // ── State ─────────────────────────────────────────────────────
 const layers = { commercial: true, military: true, ships: true };
 let aisstreamKey = localStorage.getItem('aisstreamKey') || CONFIG.aisstreamKey || '';
 let cmd;
+
+// ── ML Intelligence ─────────────────────────────────────────
+let _mlWs = null;
+let _mlReconnectTimer = null;
+let _mlReconnectDelay = 3000;
+const _anomalyMap = new Map();   // icao24 -> anomaly data
 
 // ── Startup ───────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
@@ -31,15 +37,17 @@ window.addEventListener('DOMContentLoaded', () => {
         setSearch: applySearch,
         saveKey: saveAISKey,
         pushAlert,
+        getAnomalies: () => _anomalyMap,
     });
 
     wireControls();
     tick();
     setInterval(tick, CONFIG.flightRefreshMs);
     startAIS();
+    startML();
 
-    pushAlert('SENTINEL online — feeds initialising…', 'info');
-    pushAlert('Type commands below  ·  try "help"', 'info');
+    pushAlert('SENTINEL online \u2014 feeds initialising\u2026', 'info');
+    pushAlert('Type commands below  \u00b7  try "help"', 'info');
 });
 
 // ── Polling ───────────────────────────────────────────────────
@@ -82,7 +90,7 @@ function startAIS() {
         (status) => {
             setAISStatus(status);
             if (status === 'connected') pushAlert('Ship AIS feed connected', 'success');
-            if (status === 'error') pushAlert('AIS error — retrying in 30s', 'warn');
+            if (status === 'error') pushAlert('AIS error \u2014 retrying in 30s', 'warn');
             if (status === 'disconnected') setTimeout(startAIS, 30000);
         },
     );
@@ -144,7 +152,7 @@ function wireControls() {
         if (key) {
             saveAISKey(key);
             document.getElementById('settings-modal').classList.remove('open');
-            pushAlert('AIS key saved. Connecting…', 'success');
+            pushAlert('AIS key saved. Connecting\u2026', 'success');
         }
     });
 
@@ -153,7 +161,7 @@ function wireControls() {
         const s = document.getElementById('sidebar');
         const t = document.getElementById('sidebar-toggle');
         s.classList.toggle('collapsed');
-        t.textContent = s.classList.contains('collapsed') ? '▶' : '◀';
+        t.textContent = s.classList.contains('collapsed') ? '\u25b6' : '\u25c0';
     });
 
     // Command terminal
@@ -185,7 +193,95 @@ function wireControls() {
 
 // ── Marker click ──────────────────────────────────────────────
 function onMarkerClick(data) {
+    // Enrich with ML data if available
+    const mlData = _anomalyMap.get(data.icao24);
+    if (mlData) {
+        data.anomaly = true;
+        data.anomalyScore = mlData.anomaly_score;
+        data.anomalyReasons = mlData.reasons;
+        data.milConfidence = mlData.mil_confidence;
+        data.milMethod = mlData.mil_method;
+        data.milLabel = mlData.mil_label;
+    }
     showDetailPanel(data);
     const panel = document.getElementById('detail-panel');
     if (panel) { panel._justOpened = true; setTimeout(() => { panel._justOpened = false; }, 100); }
 }
+
+// ── ML Intelligence WebSocket ─────────────────────────────────
+function startML() {
+    if (!CONFIG.mlWs) return;
+
+    const url = CONFIG.mlWs;
+    console.info('[ML] Connecting to ML service:', url);
+
+    try {
+        _mlWs = new WebSocket(url);
+    } catch (e) {
+        console.warn('[ML] WebSocket creation failed:', e);
+        _scheduleMLReconnect();
+        return;
+    }
+
+    _mlWs.onopen = () => {
+        console.info('[ML] Connected to ML service');
+        _mlReconnectDelay = 3000;
+        pushAlert('ML Intelligence connected', 'success');
+    };
+
+    _mlWs.onmessage = (ev) => {
+        try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'anomalies' || msg.type === 'snapshot') {
+                _handleMLAnomalies(msg.anomalies || []);
+            }
+        } catch (err) {
+            console.warn('[ML] parse error:', err);
+        }
+    };
+
+    _mlWs.onerror = () => {
+        console.warn('[ML] WebSocket error');
+    };
+
+    _mlWs.onclose = () => {
+        console.info('[ML] Disconnected');
+        _scheduleMLReconnect();
+    };
+}
+
+function _scheduleMLReconnect() {
+    clearTimeout(_mlReconnectTimer);
+    _mlReconnectTimer = setTimeout(() => {
+        startML();
+        _mlReconnectDelay = Math.min(_mlReconnectDelay * 2, 30000);
+    }, _mlReconnectDelay);
+}
+
+function _handleMLAnomalies(anomalies) {
+    _anomalyMap.clear();
+
+    for (const a of anomalies) {
+        _anomalyMap.set(a.icao24, a);
+        // Flag entity in canvas layer
+        upsertAircraft({
+            ...a,
+            anomaly: true,
+            anomalyReasons: a.reasons,
+            lastUpdate: Date.now(),
+        });
+    }
+
+    if (anomalies.length > 0) {
+        const top = anomalies[0];
+        const reason = top.reasons?.[0] || 'unusual pattern';
+        if (anomalies.length === 1) {
+            pushAlert(`\u26a0 Anomaly: ${top.callsign || top.icao24} \u2014 ${reason}`, 'warn');
+        } else {
+            pushAlert(`\u26a0 ${anomalies.length} anomalies detected (e.g. ${top.callsign || top.icao24}: ${reason})`, 'warn');
+        }
+    }
+}
+
+// Export for commands
+export function getAnomalyMap() { return _anomalyMap; }

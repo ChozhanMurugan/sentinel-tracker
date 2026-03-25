@@ -18,6 +18,10 @@ const CONFIG = {
     backendWs: 'ws://localhost:8000/ws',   // WebSocket live stream
     backendApi: 'http://localhost:8000',     // REST API base
 
+    // ── ML Intelligence (sentinel-ml) ───────────────────────────
+    mlWs: 'ws://localhost:8001/ws',          // ML anomaly WebSocket
+    mlApi: 'http://localhost:8001',           // ML REST API base
+
     // ── OpenSky Network (fallback) ──────────────────────────────
     openskyUrl: 'https://opensky-network.org/api/states/all',
 

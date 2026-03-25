@@ -22,19 +22,34 @@ export function showDetailPanel(data) {
       <div class="stat-row"><span>Last Update</span><strong>${timeAgo(data.lastUpdate)}</strong></div>`;
     } else {
         const mil = data.military;
-        $('detail-title').textContent = data.callsign || data.icao24 || '—';
-        $('detail-sub').textContent = `ICAO: ${data.icao24}  ·  ${data.country}`;
-        $('detail-badge').textContent = mil ? '⭐ MILITARY' : '✈ COMMERCIAL';
+        $('detail-title').textContent = data.callsign || data.icao24 || '\u2014';
+        $('detail-sub').textContent = `ICAO: ${data.icao24}  \u00b7  ${data.country}`;
+        $('detail-badge').textContent = mil ? '\u2b50 MILITARY' : '\u2708 COMMERCIAL';
         $('detail-badge').className = `badge ${mil ? 'badge-military' : 'badge-commercial'}`;
-        $('detail-body').innerHTML = `
+
+        let html = `
       <div class="stat-row"><span>Altitude</span><strong>${data.altitude != null ? data.altitude.toLocaleString() + ' m' : 'Ground'}</strong></div>
       <div class="stat-row"><span>Speed</span><strong>${data.speed != null ? data.speed + ' kts' : 'N/A'}</strong></div>
-      <div class="stat-row"><span>Heading</span><strong>${data.heading}°</strong></div>
+      <div class="stat-row"><span>Heading</span><strong>${data.heading}\u00b0</strong></div>
       <div class="stat-row"><span>Vert. Rate</span><strong>${data.vertRate != null ? data.vertRate + ' m/s' : 'N/A'}</strong></div>
       <div class="stat-row"><span>Squawk</span><strong>${data.squawk || 'N/A'}</strong></div>
       <div class="stat-row"><span>Origin</span><strong>${data.country}</strong></div>
       <div class="stat-row"><span>On Ground</span><strong>${data.onGround ? 'Yes' : 'No'}</strong></div>
       <div class="stat-row"><span>Last Update</span><strong>${timeAgo(data.lastUpdate)}</strong></div>`;
+
+        // ML Intelligence section
+        if (data.anomaly) {
+            html += `
+      <div class="detail-ml-section">
+        <div class="detail-ml-title">\ud83e\udde0 ML Intelligence</div>
+        <div class="stat-row"><span>Anomaly Score</span><strong style="color:#ff8c00">${data.anomalyScore != null ? data.anomalyScore.toFixed(3) : 'N/A'}</strong></div>
+        <div class="stat-row"><span>Reasons</span><strong style="color:#ff8c00">${(data.anomalyReasons || []).join(', ') || 'N/A'}</strong></div>
+        ${data.milConfidence != null ? `<div class="stat-row"><span>Mil. Confidence</span><strong>${(data.milConfidence * 100).toFixed(0)}%</strong></div>` : ''}
+        ${data.milMethod ? `<div class="stat-row"><span>Mil. Method</span><strong>${data.milMethod}${data.milLabel ? ' (' + data.milLabel + ')' : ''}</strong></div>` : ''}
+      </div>`;
+        }
+
+        $('detail-body').innerHTML = html;
     }
 }
 

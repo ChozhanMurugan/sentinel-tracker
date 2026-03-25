@@ -875,7 +875,6 @@ input:checked+.toggle-slider::before {
   animation: icon-breathe 3s ease-in-out infinite;
 }
 
-/* ── Military ring pulse ───────────────────────────────────── */
 @keyframes mil-ring {
   0% {
     box-shadow: 0 0 0 0 rgba(255, 59, 59, 0.6);
@@ -888,4 +887,22 @@ input:checked+.toggle-slider::before {
   100% {
     box-shadow: 0 0 0 0 rgba(255, 59, 59, 0);
   }
+}
+
+/* ── ML Intelligence Section ──────────────────────────────── */
+.detail-ml-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 140, 0, 0.3);
+}
+
+.detail-ml-title {
+  font-family: var(--font-head);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #ff8c00;
+  text-shadow: 0 0 8px rgba(255, 140, 0, 0.5);
+  margin-bottom: 8px;
 }

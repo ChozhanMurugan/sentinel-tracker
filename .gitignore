@@ -13,3 +13,9 @@ secrets.js
 
 # Node (if ever added)
 node_modules/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
