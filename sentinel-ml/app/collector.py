@@ -8,7 +8,8 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
-import httpx
+import msgpack
+from aiokafka import AIOKafkaConsumer
 
 from .config import settings
 
@@ -37,8 +38,8 @@ class Collector:
     _buffer: dict[str, deque[Snapshot]] = field(default_factory=lambda: defaultdict(lambda: deque(maxlen=settings.buffer_depth)))
     _latest: dict[str, Snapshot] = field(default_factory=dict)
     _running: bool = False
-    _total_polls: int = 0
-    _last_poll_ts: float = 0
+    _total_msgs: int = 0
+    _last_msg_ts: float = 0
     _aircraft_seen: int = 0
 
     # ── public ---------------------------------------------------------
@@ -52,8 +53,8 @@ class Collector:
     @property
     def stats(self) -> dict:
         return {
-            "total_polls": self._total_polls,
-            "last_poll_ts": self._last_poll_ts,
+            "total_kafka_msgs": self._total_msgs,
+            "last_msg_ts": self._last_msg_ts,
             "aircraft_tracked": len(self._latest),
             "buffer_entries": sum(len(v) for v in self._buffer.values()),
         }
@@ -62,53 +63,65 @@ class Collector:
 
     async def start(self):
         self._running = True
-        while self._running:
-            await self._poll()
-            await asyncio.sleep(settings.poll_interval_s)
+        
+        consumer = AIOKafkaConsumer(
+            settings.kafka_topic,
+            bootstrap_servers=settings.kafka_broker,
+            value_deserializer=lambda m: msgpack.unpackb(m),
+            client_id="sentinel-ml-collector",
+            group_id="sentinel-ml-group",
+        )
+        await consumer.start()
+        print(f"[Collector] Connected to Kafka broker at {settings.kafka_broker}")
+
+        try:
+            while self._running:
+                msg = await consumer.getone()
+                # msg.value contains the delta payload published by backend worker
+                self._process_msg(msg.value)
+        except Exception as e:
+            print(f"[Collector] Consumer error: {e}")
+        finally:
+            await consumer.stop()
 
     def stop(self):
         self._running = False
 
     # ── internal -------------------------------------------------------
 
-    async def _poll(self):
-        try:
-            async with httpx.AsyncClient(timeout=15, verify=False) as client:
-                resp = await client.get(settings.opensky_url)
-                resp.raise_for_status()
-                data = resp.json()
-        except Exception as exc:
-            print(f"[Collector] poll error: {exc}")
+    def _process_msg(self, data: dict):
+        upserts = data.get("upsert", [])
+        if not upserts:
             return
 
-        states = data.get("states") or []
         now = time.time()
-        self._total_polls += 1
-        self._last_poll_ts = now
+        self._total_msgs += 1
+        self._last_msg_ts = now
         seen = 0
 
-        for s in states:
-            if s[6] is None or s[5] is None:
-                continue  # no position
-
-            icao24 = s[0]
+        for state in upserts:
+            icao24 = state.get("id")
+            if not icao24:
+                continue
+                
             snap = Snapshot(
-                ts=s[3] or now,
+                ts=state.get("ts", now),
                 icao24=icao24,
-                callsign=(s[1] or "").strip(),
-                lat=s[6],
-                lon=s[5],
-                altitude=s[7] or 0,       # baro altitude metres
-                speed=s[9] or 0,           # ground speed m/s
-                heading=s[10] or 0,
-                vert_rate=s[11] or 0,
-                on_ground=bool(s[8]),
-                country=s[2] or "",
-                squawk=s[14] or "",
+                callsign=(state.get("cs") or "").strip(),
+                lat=state.get("lat") or 0.0,
+                lon=state.get("lon") or 0.0,
+                altitude=state.get("alt") or 0.0,
+                speed=state.get("spd") or 0.0,
+                heading=state.get("hdg") or 0.0,
+                vert_rate=state.get("vrt") or 0.0,
+                on_ground=state.get("gnd", False),
+                country=state.get("cty", ""),
+                squawk=state.get("sq", ""),
             )
             self._buffer[icao24].append(snap)
             self._latest[icao24] = snap
             seen += 1
 
         self._aircraft_seen = seen
-        print(f"[Collector] poll #{self._total_polls}: {seen} aircraft")
+        # print(f"[Collector] msg #{self._total_msgs} processed: {seen} aircraft updated")
+

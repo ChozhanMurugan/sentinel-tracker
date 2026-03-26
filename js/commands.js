@@ -185,7 +185,16 @@ export class CommandProcessor {
     }
 
     _flyTo({ center, zoom }) {
-        this._map.flyTo(center, zoom, { animate: true, duration: 1.4, easeLinearity: 0.5 });
+        this._map.setProps({
+            initialViewState: {
+                longitude: center[1],
+                latitude: center[0],
+                zoom: zoom,
+                pitch: 45,
+                bearing: 0,
+                transitionDuration: 1400
+            }
+        });
     }
 
     _handleAnalyze() {

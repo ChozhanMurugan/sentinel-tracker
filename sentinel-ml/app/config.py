@@ -5,8 +5,9 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # OpenSky
-    opensky_url: str = "https://opensky-network.org/api/states/all"
+    # Kafka
+    kafka_broker: str = "localhost:9092"
+    kafka_topic: str = "flight_states"
     poll_interval_s: int = 10
 
     # Anomaly detector

@@ -180,11 +180,12 @@ function wireControls() {
         }
     });
 
-    // Click on map closes detail panel
-    getMap()?.on('click', () => {
-        // Small delay — canvas-layer click fires first
+    // Click on map background closes detail panel
+    document.getElementById('map')?.addEventListener('click', () => {
+        // Small delay to allow layer clicks to process first
         setTimeout(() => {
-            if (!document.getElementById('detail-panel')._justOpened) {
+            const panel = document.getElementById('detail-panel');
+            if (panel && !panel._justOpened) {
                 hideDetailPanel();
             }
         }, 50);

@@ -8,7 +8,7 @@
   <meta name="description"
     content="Real-time open-source tracking dashboard for flights, military aircraft, and ships." />
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+  <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
   <link rel="stylesheet" href="styles/main.css" />
 
   <link rel="icon"
@@ -186,10 +186,11 @@
     <div class="bottom-item">NEXT IN <span id="countdown">10</span>s</div>
   </div>
 
-  <!-- Leaflet -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+  <!-- MapLibre & Deck.gl -->
+  <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/deck.gl@8.9.3/dist.min.js"></script>
   <!-- App -->
-  <script type="module" src="js/app.js?v=3"></script>
+  <script type="module" src="js/app.js?v=4"></script>
 
   <script>
     // UTC clock
