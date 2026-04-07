@@ -165,7 +165,7 @@ Each aircraft's 6-snapshot deque is reduced to a **10-dimensional feature vector
 | Altitude variance | $\sigma_h^2$ | $\text{std}([h_1, \ldots, h_6])$ |
 | Is circling | $c$ | $\mathbb{1}\left[\sum_i \|\Delta\psi_i\| > 300°\right]$ |
 | Distance moved | $d$ | $\sum_i d_{\text{haversine}}(p_i, p_{i+1})$ (km) |
-| Ground ratio | $g$ | $\frac{\text{count}(\text{on\_ground})}{N}$ |
+| Ground ratio | $g$ | g = count(on_ground) / N |
 
 The **haversine distance** between consecutive snapshots:
 
