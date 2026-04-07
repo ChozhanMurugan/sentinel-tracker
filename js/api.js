@@ -72,35 +72,47 @@ function _connectBackend() {
 
 export async function fetchFlights() {
     try {
-        const resp = await fetch(CONFIG.openskyUrl);
-        if (!resp.ok) return [];
+        // Try direct first; fall back to CORS proxy if blocked
+        let resp = await fetch(CONFIG.openskyUrl).catch(() => null);
+        if (!resp || !resp.ok) {
+            const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(CONFIG.openskyUrl)}`;
+            const proxyResp = await fetch(proxy);
+            if (!proxyResp.ok) return [];
+            const wrapper = await proxyResp.json();
+            const data = JSON.parse(wrapper.contents || '{}');
+            return _parseStates(data.states || []);
+        }
         const data = await resp.json();
-        const states = data.states || [];
-        return states
-            .filter(s => s[6] != null && s[5] != null)
-            .map(s => ({
-                icao24: s[0],
-                callsign: (s[1] || '').trim(),
-                country: s[2] || '',
-                lat: s[6],
-                lon: s[5],
-                altitude: s[7],
-                speed: s[9],
-                heading: s[10],
-                vertRate: s[11],
-                onGround: !!s[8],
-                squawk: s[14] || '',
-                military: _isMilitary(s[0], (s[1] || '').trim()),
-                lastUpdate: (s[3] || Date.now() / 1000) * 1000,
-                type: 'aircraft',
-            }));
+        return _parseStates(data.states || []);
     } catch (e) {
         console.warn('[API] OpenSky poll error:', e);
         return [];
     }
 }
 
-// Quick heuristic \u2014 matches CONFIG.militaryIcaoRanges + callsign patterns
+// ── Shared state parser ──────────────────────────────────────────────────
+function _parseStates(states) {
+    return states
+        .filter(s => s[6] != null && s[5] != null)
+        .map(s => ({
+            icao24: s[0],
+            callsign: (s[1] || '').trim(),
+            country: s[2] || '',
+            lat: s[6],
+            lon: s[5],
+            altitude: s[7],
+            speed: s[9],
+            heading: s[10],
+            vertRate: s[11],
+            onGround: !!s[8],
+            squawk: s[14] || '',
+            military: _isMilitary(s[0], (s[1] || '').trim()),
+            lastUpdate: (s[3] || Date.now() / 1000) * 1000,
+            type: 'aircraft',
+        }));
+}
+
+// Quick heuristic — matches CONFIG.militaryIcaoRanges + callsign patterns
 function _isMilitary(icao, cs) {
     try {
         const val = parseInt(icao, 16);

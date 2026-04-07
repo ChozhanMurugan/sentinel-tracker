@@ -26,14 +26,51 @@ from app.services.military import classify
 from app.services.broadcaster import manager
 from app.database import AsyncSessionLocal
 from app.models.aircraft import AircraftPosition
+from app.services.kafka_publisher import publish_states
 
 log = logging.getLogger(__name__)
 
 # OpenSky base URL
 _URL = "https://opensky-network.org/api/states/all"
+_TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
+
+# Token cache
+_token: str | None = None
+_token_expiry: float = 0.0
 
 # In-memory snapshot of previous cycle for delta calculation
 _prev_snapshot: dict[str, dict] = {}
+
+
+async def _get_token() -> str | None:
+    """Fetch (or return cached) OAuth2 Bearer token from OpenSky."""
+    global _token, _token_expiry
+    if not (settings.OPENSKY_CLIENT_ID and settings.OPENSKY_CLIENT_SECRET):
+        return None
+    if _token and time.time() < _token_expiry - 30:
+        return _token
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                _TOKEN_URL,
+                data={
+                    "grant_type":    "client_credentials",
+                    "client_id":     settings.OPENSKY_CLIENT_ID,
+                    "client_secret": settings.OPENSKY_CLIENT_SECRET,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        if resp.status_code == 200:
+            body = resp.json()
+            _token = body["access_token"]
+            _token_expiry = time.time() + body.get("expires_in", 3600)
+            log.info("OpenSky OAuth2 token acquired (expires in %ds)", body.get("expires_in", 3600))
+            return _token
+        else:
+            log.error("OpenSky token fetch failed: HTTP %d — %s", resp.status_code, resp.text[:200])
+    except Exception as exc:
+        log.error("OpenSky token error: %s", exc)
+    return None
 
 
 def _parse_state(state: list) -> dict | None:
@@ -82,18 +119,31 @@ def _parse_state(state: list) -> dict | None:
 
 
 async def _fetch_opensky() -> list[dict]:
-    """Fetch all states from OpenSky. Returns list of parsed dicts."""
+    """Fetch all states from OpenSky. Prefers OAuth2; falls back to Basic Auth."""
     try:
+        headers = {}
         auth = None
-        if settings.OPENSKY_USER and settings.OPENSKY_PASS:
+
+        # Prefer OAuth2 client credentials
+        token = await _get_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        elif settings.OPENSKY_USER and settings.OPENSKY_PASS:
             auth = (settings.OPENSKY_USER, settings.OPENSKY_PASS)
 
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(_URL, auth=auth)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(_URL, auth=auth, headers=headers)
+
+        if resp.status_code == 401:
+            # Token may have expired — clear cache and retry once
+            global _token, _token_expiry
+            _token, _token_expiry = None, 0.0
+            log.warning("OpenSky 401 — clearing token cache, will retry next cycle")
+            return []
 
         if resp.status_code == 429:
-            log.warning("OpenSky rate limited — backing off 30s")
-            await asyncio.sleep(30)
+            log.warning("OpenSky rate limited (429) — backing off 60s")
+            await asyncio.sleep(60)
             return []
 
         if resp.status_code != 200:
@@ -194,10 +244,11 @@ async def poll() -> None:
     if not entities:
         return
 
-    # Run DB persist and Redis update in parallel
-    changed, _ = await asyncio.gather(
+    # Run DB persist, Redis update, and Kafka publish in parallel
+    changed, _, _ = await asyncio.gather(
         _update_redis(entities),
         _persist(entities),
+        publish_states(entities),
     )
     removed = await _prune_stale()
 

@@ -63,26 +63,36 @@ class Collector:
 
     async def start(self):
         self._running = True
-        
-        consumer = AIOKafkaConsumer(
-            settings.kafka_topic,
-            bootstrap_servers=settings.kafka_broker,
-            value_deserializer=lambda m: msgpack.unpackb(m),
-            client_id="sentinel-ml-collector",
-            group_id="sentinel-ml-group",
-        )
-        await consumer.start()
-        print(f"[Collector] Connected to Kafka broker at {settings.kafka_broker}")
 
-        try:
-            while self._running:
-                msg = await consumer.getone()
-                # msg.value contains the delta payload published by backend worker
-                self._process_msg(msg.value)
-        except Exception as e:
-            print(f"[Collector] Consumer error: {e}")
-        finally:
-            await consumer.stop()
+        while self._running:
+            consumer: AIOKafkaConsumer | None = None
+            try:
+                consumer = AIOKafkaConsumer(
+                    settings.kafka_topic,
+                    bootstrap_servers=settings.kafka_broker,
+                    value_deserializer=lambda m: msgpack.unpackb(m),
+                    client_id="sentinel-ml-collector",
+                    group_id="sentinel-ml-group",
+                )
+                await consumer.start()
+                print(f"[Collector] Connected to Kafka broker at {settings.kafka_broker}")
+
+                while self._running:
+                    msg = await consumer.getone()
+                    # msg.value contains the delta payload published by backend worker
+                    self._process_msg(msg.value)
+
+            except asyncio.CancelledError:
+                break  # lifespan shutdown — exit cleanly
+            except Exception as e:
+                print(f"[Collector] Consumer error: {e} — retrying in 10s")
+                await asyncio.sleep(10)
+            finally:
+                if consumer is not None:
+                    try:
+                        await consumer.stop()
+                    except Exception:
+                        pass
 
     def stop(self):
         self._running = False
@@ -111,7 +121,8 @@ class Collector:
                 lat=state.get("lat") or 0.0,
                 lon=state.get("lon") or 0.0,
                 altitude=state.get("alt") or 0.0,
-                speed=state.get("spd") or 0.0,
+                # Backend publishes speed in knots; features.py expects m/s
+                speed=(state.get("spd") or 0.0) / 1.944,
                 heading=state.get("hdg") or 0.0,
                 vert_rate=state.get("vrt") or 0.0,
                 on_ground=state.get("gnd", False),

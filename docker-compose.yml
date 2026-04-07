@@ -1,0 +1,135 @@
+version: "3.9"
+
+services:
+
+  # ── Zookeeper (required by Kafka) ──────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_4LW_COMMANDS_WHITELIST: "mntr,conf,ruok"
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "cub zk-ready localhost:2181 10" ]
+      interval: 10s
+      timeout: 15s
+      retries: 5
+      start_period: 15s
+
+  # ── Kafka broker ───────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: [ "CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka:9092" ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 20s
+
+  # ── TimescaleDB (PostgreSQL + time-series extension) ───────────────
+  db:
+    image: timescale/timescaledb:latest-pg15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sentinel
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: sentinel_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/01_init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U sentinel -d sentinel" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis (cache + pub/sub for backend) ───────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+
+  # ── Backend (FastAPI — flight data ingestion + WebSocket stream) ───
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sentinel:sentinel_pass@db:5432/sentinel
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKER: kafka:9092
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: "8000"
+      CORS_ORIGINS: '["http://localhost:8787","http://127.0.0.1:8787"]'
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Sentinel ML (FastAPI / Uvicorn) ────────────────────────────────
+  sentinel-ml:
+    build:
+      context: ./sentinel-ml
+      dockerfile: Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SENTINEL_ML_KAFKA_BROKER: kafka:9092
+      SENTINEL_ML_KAFKA_TOPIC: flight_states
+      SENTINEL_ML_HOST: 0.0.0.0
+      SENTINEL_ML_PORT: "8001"
+      SENTINEL_ML_CORS_ORIGINS: '["http://localhost:8787","http://127.0.0.1:8787"]'
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/health').raise_for_status()" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Frontend (nginx static + reverse-proxy) ────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
+      sentinel-ml:
+        condition: service_healthy
+    ports:
+      - "8787:80"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    name: sentinel-pgdata

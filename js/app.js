@@ -20,7 +20,14 @@ const layers = { commercial: true, military: true, ships: true };
 let aisstreamKey = localStorage.getItem('aisstreamKey') || CONFIG.aisstreamKey || '';
 let cmd;
 
-// ── ML Intelligence ─────────────────────────────────────────
+// ── Backend WebSocket ─────────────────────────────────────────
+let _ws = null;
+let _wsConnected = false;
+let _wsReconnectTimer = null;
+let _wsReconnectDelay = 2000;
+const _WS_URL = `ws://${location.host}/ws`;  // proxied via nginx
+
+// ── ML Intelligence ──────────────────────────────────────────
 let _mlWs = null;
 let _mlReconnectTimer = null;
 let _mlReconnectDelay = 3000;
@@ -41,8 +48,7 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 
     wireControls();
-    tick();
-    setInterval(tick, CONFIG.flightRefreshMs);
+    startBackendWS();   // primary — backend WebSocket
     startAIS();
     startML();
 
@@ -50,24 +56,122 @@ window.addEventListener('DOMContentLoaded', () => {
     pushAlert('Type commands below  \u00b7  try "help"', 'info');
 });
 
-// ── Polling ───────────────────────────────────────────────────
+// ── Backend WebSocket (primary data source) ───────────────────
+/**
+ * Maps compact backend field names → frontend field names expected
+ * by upsertAircraft() / map.js
+ */
+function _normaliseAircraft(ac) {
+    return {
+        icao24:    ac.id   || ac.icao24,
+        callsign:  ac.cs   || ac.callsign || '',
+        country:   ac.cty  || ac.country  || '',
+        lat:       ac.lat,
+        lon:       ac.lon,
+        altitude:  ac.alt  != null ? ac.alt  : ac.altitude,
+        speed:     ac.spd  != null ? ac.spd  : ac.speed,
+        heading:   ac.hdg  != null ? ac.hdg  : ac.heading,
+        vertRate:  ac.vrt  != null ? ac.vrt  : ac.vertRate,
+        onGround:  ac.gnd  != null ? ac.gnd  : ac.onGround,
+        squawk:    ac.sq   || ac.squawk || '',
+        military:  ac.mil  != null ? ac.mil  : (ac.military || false),
+        lastUpdate:(ac.ts  ? ac.ts * 1000 : null) || ac.lastUpdate || Date.now(),
+        type: 'aircraft',
+    };
+}
+
+function _normaliseShip(s) {
+    return {
+        mmsi:      s.id  || s.mmsi,
+        name:      s.cs  || s.name || '',
+        country:   s.cty || s.country || '',
+        lat:       s.lat,
+        lon:       s.lon,
+        speed:     s.spd != null ? s.spd : s.speed,
+        heading:   s.hdg != null ? s.hdg : s.heading,
+        lastUpdate:(s.ts  ? s.ts * 1000 : null) || s.lastUpdate || Date.now(),
+        type: 'ship',
+    };
+}
+
+function _applySnapshot(msg) {
+    const aircraft = msg.aircraft || msg.upsert || [];
+    const ships    = msg.ships    || [];
+    for (const ac of aircraft) upsertAircraft(_normaliseAircraft(ac));
+    for (const s  of ships)    upsertShip(_normaliseShip(s));
+    pruneStaleMarkers(90000);
+    updateStats(getMarkerCounts());
+    setLastRefresh();
+    setFlightStatus(true);
+}
+
+function _applyDelta(msg) {
+    const upserts = msg.upsert || [];
+    const removes = msg.remove || [];
+    for (const ac of upserts) upsertAircraft(_normaliseAircraft(ac));
+    // removed IDs — pruneStaleMarkers will clean them naturally
+    pruneStaleMarkers(90000);
+    updateStats(getMarkerCounts());
+    setLastRefresh();
+    setFlightStatus(true);
+}
+
+function startBackendWS() {
+    if (_ws) { try { _ws.close(); } catch (_) {} }
+
+    console.info('[WS] Connecting to', _WS_URL);
+    try { _ws = new WebSocket(_WS_URL); }
+    catch (e) {
+        console.warn('[WS] Could not create WebSocket, falling back to polling');
+        _startPollingFallback();
+        return;
+    }
+
+    _ws.onopen = () => {
+        _wsConnected = true;
+        _wsReconnectDelay = 2000;
+        console.info('[WS] Connected to backend');
+        setFlightStatus(true);
+    };
+
+    _ws.onmessage = (ev) => {
+        try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'snapshot') _applySnapshot(msg);
+            else if (msg.type === 'delta') _applyDelta(msg);
+        } catch (err) { console.warn('[WS] parse error', err); }
+    };
+
+    _ws.onerror = () => {
+        console.warn('[WS] error');
+        _wsConnected = false;
+    };
+
+    _ws.onclose = () => {
+        _wsConnected = false;
+        console.warn('[WS] closed — reconnecting in', _wsReconnectDelay, 'ms');
+        clearTimeout(_wsReconnectTimer);
+        _wsReconnectTimer = setTimeout(() => {
+            _wsReconnectDelay = Math.min(_wsReconnectDelay * 2, 30000);
+            startBackendWS();
+        }, _wsReconnectDelay);
+    };
+}
+
+// ── Polling fallback (used only if backend WS unavailable) ────
+let _fallbackInterval = null;
+function _startPollingFallback() {
+    if (_fallbackInterval) return;
+    pushAlert('Backend WS unavailable — using direct OpenSky poll', 'warn');
+    _fallbackInterval = setInterval(tick, CONFIG.flightRefreshMs);
+    tick();
+}
+
 async function tick() {
     try {
         const flights = await fetchFlights();
-        const filter = getSearchFilter();
-
-        for (const ac of flights) {
-            upsertAircraft(ac);
-        }
-
+        for (const ac of flights) upsertAircraft(ac);
         pruneStaleMarkers(90000);
-
-        // Apply search filter to canvas layer in one shot
-        setMapFilter(filter === null ? null : (e) => {
-            if (e.type === 'ship') return filter(e);
-            return filter(e);
-        });
-
         updateStats(getMarkerCounts());
         setLastRefresh();
         setFlightStatus(true);

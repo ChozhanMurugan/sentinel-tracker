@@ -19,8 +19,9 @@ const CONFIG = {
     backendApi: 'http://localhost:8000',     // REST API base
 
     // ── ML Intelligence (sentinel-ml) ───────────────────────────
-    mlWs: 'ws://localhost:8001/ws',          // ML anomaly WebSocket
-    mlApi: 'http://localhost:8001',           // ML REST API base
+    // Proxied through nginx (/ml-ws, /ml/) — matches how backend WS works
+    mlWs: `ws://${location.host}/ml-ws`,     // ML anomaly WebSocket (via nginx proxy)
+    mlApi: `${location.protocol}//${location.host}/ml`,  // ML REST API base (via nginx proxy)
 
     // ── OpenSky Network (fallback) ──────────────────────────────
     openskyUrl: 'https://opensky-network.org/api/states/all',

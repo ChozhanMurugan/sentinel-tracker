@@ -22,10 +22,16 @@ class Settings(BaseSettings):
     # ── Redis ─────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379"
 
+    # ── Kafka ─────────────────────────────────────────────────
+    KAFKA_BROKER: str = "localhost:9092"
+    KAFKA_TOPIC_AIRCRAFT: str = "flight_states"
+
     # ── OpenSky ───────────────────────────────────────────────
-    OPENSKY_USER: str = ""
-    OPENSKY_PASS: str = ""
-    OPENSKY_REFRESH_S: int = 5
+    OPENSKY_USER: str = ""          # legacy basic auth
+    OPENSKY_PASS: str = ""          # legacy basic auth
+    OPENSKY_CLIENT_ID: str = ""     # OAuth2 client credentials
+    OPENSKY_CLIENT_SECRET: str = "" # OAuth2 client credentials
+    OPENSKY_REFRESH_S: int = 10
 
     # ── AIS ───────────────────────────────────────────────────
     AIS_KEY: str = ""
